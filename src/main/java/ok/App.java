@@ -154,7 +154,7 @@ public class App {
             parameters.nnLayers=nnl;
         }
 
-        Trainer trainer = nn!=null ? new Trainer() {
+        Trainer trainer = parameters.nnLayers!=null ? new Trainer() {
             @Override
             public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey) {
                 return trainNN(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey);
@@ -631,7 +631,7 @@ public class App {
             network = (BasicNetwork) ((NNPredictor) initialPred).getNn().clone();
         } else {
             network = new BasicNetwork();
-            network.addLayer(new BasicLayer(null, true, 1));
+            network.addLayer(new BasicLayer(null, false, parameters.featuresLength));
             for (int nnLayer : parameters.nnLayers) {
                 network.addLayer(new BasicLayer(new ActivationTANH(), true, nnLayer));
             }
