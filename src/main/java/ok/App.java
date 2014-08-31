@@ -1,6 +1,13 @@
 package ok;
 
 import au.com.bytecode.opencsv.CSVReader;
+import org.encog.engine.network.activation.ActivationLinear;
+import org.encog.engine.network.activation.ActivationTANH;
+import org.encog.mathutil.randomize.ConsistentRandomizer;
+import org.encog.ml.data.basic.BasicMLDataSet;
+import org.encog.neural.networks.BasicNetwork;
+import org.encog.neural.networks.layers.BasicLayer;
+import org.encog.neural.networks.training.propagation.back.Backpropagation;
 import org.jblas.ComplexDoubleMatrix;
 import org.jblas.DoubleMatrix;
 import org.jblas.Eigen;
@@ -13,104 +20,11 @@ import java.io.*;
 import java.util.*;
 import java.util.concurrent.RecursiveAction;
 
-//import com.jmatio.io.MatFileWriter;
-//import com.jmatio.types.MLArray;
-//import com.jmatio.types.MLDouble;
-
 /**
- * Hello world!
+ * @author Petr Zhalybin
+ * @since 06.07.2014
  */
 public class App {
-    static class HasTime {
-        int hour;
-        int dayofweek;
-        int dayofmonth;
-        int year;
-        int month;
-        long time;
-    }
-
-    static class Post extends HasTime {
-        String txt;
-        long[] img;
-        int id;
-        int groupid;
-        int likes;
-        double loglikes;
-        int pool;
-        WordStatTf[] words;
-        public int capsWord;
-        public int vosklic;
-        GroupStat groupStat;
-
-
-        double frequencyForTenPostsInGroup;
-        double postsInGroupTomorrowDelta;
-        double postsInGroupHourDelta;
-
-        double[] features;
-        public int wordsNum;
-        public int maxTf;
-        public WordStatTf[] trigramsConsChars;
-        public int trigramsNum;
-        public int maxTrigramTf;
-
-        double[] sentence2vec;
-
-        public String toString() {
-            return txt;
-        }
-    }
-
-    static class LikesStat {
-        int count;
-        double likesum;
-        double likesum2;
-        double loglikesum;
-        double loglikesum2;
-
-        public void addPost(Post post) {
-            count++;
-            likesum += post.likes;
-            likesum2 += post.likes * post.likes;
-            loglikesum += post.loglikes;
-            loglikesum2 += post.loglikes * post.loglikes;
-        }
-    }
-
-    static class DateStat implements Serializable {
-        int posts;
-        int likes;
-    }
-
-    static class GroupStat {
-        int groupid;
-        int count;
-        LikesStat likesStat = new LikesStat();
-        int bowid = -1;
-        TreeMap<Integer, DateStat> dateStat = new TreeMap<Integer, DateStat>();
-    }
-
-    static class WordStat {
-        String word;
-        //        int count;
-        LikesStat likesStat = new LikesStat();
-        int bowId = -1;
-        double idf;
-
-        public String toString() {
-            return word;
-        }
-    }
-
-    static class WordStatTf {
-        WordStat stat;
-        int tf;
-
-        public String toString() {
-            return stat + ":" + tf;
-        }
-    }
 
     public static void main(String[] args) throws IOException {
 
@@ -120,7 +34,7 @@ public class App {
 
         final Map<Integer, Post> testPosts = readPosts("test_content.csv");
 
-        if(parameters.sentence2vecFile!=null) {
+        if (parameters.sentence2vecFile != null) {
             parameters.sentence2vecDim = readSentence2vec(new File(parameters.sentence2vecFile), posts, testPosts);
         }
 
@@ -205,9 +119,9 @@ public class App {
 
 
         List<Post> shuffled = new ArrayList<>(posts.values());
-        double devSetFrac = getDoubleProperty("ok.devset", 0.2);
-        Collections.shuffle(shuffled,parameters.rnd);
-        int devIdx = (int) (shuffled.size() * devSetFrac);
+
+        Collections.shuffle(shuffled, parameters.rnd);
+        int devIdx = (int) (shuffled.size() * parameters.devSetFrac);
         List<Post> dev = new ArrayList<>(shuffled.subList(0, devIdx));
         List<Post> train = new ArrayList<>(shuffled.subList(devIdx, shuffled.size()));
 
@@ -230,8 +144,29 @@ public class App {
             featuresSaver.saveFeatures(testPosts.values(), parameters, new File(saveTestFeaturesFile));
         }
 
+        String nn = System.getProperty("ok.nn");
+        if(nn!=null){
+            String[] nns=nn.split(",");
+            int[] nnl=new int[nns.length];
+            for (int i = 0; i < nnl.length; i++) {
+                 nnl[i]=Integer.valueOf(nns[i].trim());
+            }
+            parameters.nnLayers=nnl;
+        }
 
-        trainLinearRegression(posts.values(), train, dev, testPosts, parameters, groups);
+        Trainer trainer = nn!=null ? new Trainer() {
+            @Override
+            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey) {
+                return trainNN(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey);
+            }
+        } : new Trainer() {
+            @Override
+            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey) {
+                return trainLinear(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey);
+            }
+        };
+
+        trainGropusParallel(posts.values(), train, dev, testPosts, parameters, groups, trainer);
 
         System.out.println("Done.");
 
@@ -240,12 +175,12 @@ public class App {
     private static void printSent2vecClosestPosts(Map<Integer, Post> posts, Map<Integer, Post> testPosts, int limit) {
         List<Post> postsShuffled = new ArrayList<>(posts.values());
         Collections.shuffle(postsShuffled);
-        postsShuffled=postsShuffled.subList(0, limit);
+        postsShuffled = postsShuffled.subList(0, limit);
         for (Post post : postsShuffled) {
             System.out.println(post.txt);
             List<Post> closestSent2vec = findClosestSent2vec(post, 10, posts, testPosts);
-            for (Post p : closestSent2vec.subList(1,10)) {
-                System.out.println("              "+p.txt);
+            for (Post p : closestSent2vec.subList(1, 10)) {
+                System.out.println("              " + p.txt);
             }
         }
     }
@@ -259,12 +194,12 @@ public class App {
             for (Map<Integer, Post> postMap : posts) {
                 sum += postMap.size();
             }
-            if (rows != sum) throw new RuntimeException("Different size " + rows + " " + sum);
+//            if (rows != sum) throw new RuntimeException("Different size " + rows + " " + sum);
             int dim = Integer.valueOf(head[1]);
-            int ii=0;
+            int ii = 0;
             for (Map<Integer, Post> postMap : posts) {
                 for (Map.Entry<Integer, Post> e : postMap.entrySet()) {
-                    if(++ii%10000==0) System.out.println(ii);
+                    if (++ii % 10000 == 0) System.out.println(ii);
                     Post post = e.getValue();
                     String[] row = reader.readNext();
                     if (row.length != dim + 1) throw new RuntimeException("Bad row " + row.length);
@@ -314,11 +249,14 @@ public class App {
     }
 
 
-    private static void trainLinearRegression(final Collection<Post> all,
-                                              final Collection<Post> train,
-                                              final Collection<Post> dev,
-                                              final Map<Integer, Post> testPosts, final Parameters parameters, final Map<Integer, List<Post>> groups) throws IOException {
-        final Predictor predictorAll = train(train, parameters, "all", testPosts, null,
+    private static void trainGropusParallel(final Collection<Post> all,
+                                            final Collection<Post> train,
+                                            final Collection<Post> dev,
+                                            final Map<Integer, Post> testPosts,
+                                            final Parameters parameters,
+                                            final Map<Integer, List<Post>> groups,
+                                            Trainer trainer) throws IOException {
+        final Predictor predictorAll = trainer.train(train, parameters, "all", testPosts, null,
                 Integer.getInteger("ok.epochnum2", 5), null, 0);
 
 
@@ -335,7 +273,7 @@ public class App {
                 protected void compute() {
                     int g = e.getKey();
                     List<Post> po = e.getValue();
-                    Predictor predictor = train(po, parameters, "Group" + g, null, predictorAll,
+                    Predictor predictor = trainer.train(po, parameters, "Group" + g, null, predictorAll,
                             Integer.getInteger("ok.epochnum", 100), groupPred, g);
                     synchronized (groupPred) {
                         groupPred.put(g, predictor);
@@ -408,7 +346,7 @@ public class App {
 
     private static void saveResults(Predictor predictor, Collection<Post> train, Collection<Post> test) throws IOException {
         String fileName = System.getProperty("ok.outcsv", "test_result.csv");
-        saveResults(predictor, fileName.replace(".csv","_train.csv"), train, true);
+        saveResults(predictor, fileName.replace(".csv", "_train.csv"), train, true);
         saveResults(predictor, fileName, test, false);
         savePredictor(predictor);
         System.out.println("Saved result " + new Date());
@@ -529,138 +467,6 @@ public class App {
                 filewriter.println(sb.toString());
             }
         }
-    }
-
-    enum PostFeaturesSaver {
-        ARFF {
-            void saveFeatures(Collection<Post> posts, Parameters parameters, File file) throws IOException {
-                int n = 0;
-                try (PrintWriter filewriter = new PrintWriter(file)) {
-                    filewriter.println("@relation img-ok-" + file.getName());
-                    String[] fn = getFeatureNames(parameters);
-                    for (int i = 0; i < fn.length; i++) {
-                        if (parameters.skipColumns != null && parameters.skipColumns[i]) continue;
-                        filewriter.println("@attribute " + fn[i].replace(' ', '_') + " numeric");
-                    }
-                    filewriter.println("@attribute id numeric");
-                    filewriter.println("@attribute groupid numeric");
-                    filewriter.println("@attribute likes numeric");
-                    filewriter.println("@attribute floor" + ((int) parameters.logScale) + "loglikes numeric");
-                    filewriter.println("@data");
-                    double[] f = new double[parameters.featuresLength + 4];
-                    for (Post post : posts) {
-                        if (n++ % 20000 == 0) System.out.println("save features arff " + file.getName() + " " + n);
-                        fillFeatures(f, post, parameters);
-                        f[parameters.featuresLength] = post.id;
-                        f[parameters.featuresLength + 1] = post.groupid;
-                        f[parameters.featuresLength + 2] = post.likes;
-                        f[parameters.featuresLength + 3] = Math.floor(post.loglikes * parameters.logScale);
-                        StringBuilder sb = new StringBuilder();
-                        sb.append('{');
-                        for (int i = 0; i < f.length; i++) {
-                            if (parameters.skipColumns != null && parameters.skipColumns[i]) continue;
-                            double v = f[i];
-                            if (Double.isInfinite(v) || Double.isNaN(v))
-                                throw new RuntimeException("Infinite " + post.id + " " + i + " " + fn[i]);
-                            if (v != 0.0) {
-                                if (sb.length() > 1) {
-                                    sb.append(',');
-                                }
-                                sb.append(i).append(' ');
-                                if (Math.rint(v) == v && Math.abs(v)<2e9) {
-                                    sb.append((int) v);
-                                } else {
-                                    sb.append(v);
-                                }
-                            }
-                        }
-                        sb.append('}');
-                        filewriter.println(sb.toString());
-                    }
-                }
-            }
-        },
-        VW {
-            void saveFeatures(Collection<Post> posts, Parameters parameters, File file) throws IOException {
-                int n = 0;
-                try (PrintWriter filewriter = new PrintWriter(file)) {
-
-                    double[] f = new double[parameters.featuresLength];
-                    for (Post post : posts) {
-                        if (n++ % 20000 == 0) System.out.println("save features VW " + file.getName() + " " + n);
-                        fillFeatures(f, post, parameters);
-//                        int logClass = (int)(Math.floor(post.loglikes * parameters.logScale)+1);
-                        StringBuilder sb = new StringBuilder();
-                        sb.append(post.likes).append(' ');
-                        sb.append('\'').append(post.id).append(' ');
-                        sb.append('|');
-                        for (int i = 2; i < f.length; i++) {
-                            if(parameters.skipColumns!=null && parameters.skipColumns[i])continue;
-                            double v = f[i];
-                            if(Double.isInfinite(v) || Double.isNaN(v))throw new RuntimeException("Infinite "+post.id+" "+i);
-                            if (v != 0.0) {
-                                sb.append(' ');
-                                sb.append(i);
-                                if(v!=1.0) {
-                                    sb.append(':');
-                                    if (Math.rint(v) == v && Math.abs(v)<2e9) {
-                                        sb.append((int) v);
-                                    } else {
-                                        sb.append(v);
-                                    }
-                                }
-                            }
-                        }
-                        filewriter.println(sb.toString());
-                    }
-                }
-            }
-        },
-        CSV {
-            void saveFeatures(Collection<Post> posts, Parameters parameters, File file) throws IOException {
-                int n = 0;
-                try (PrintWriter filewriter = new PrintWriter(file)) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("\"id\",\"groupid\",\"likes\",\"floor" + ((int) parameters.logScale) + "loglikes\"");
-                    double[] f = new double[parameters.featuresLength];
-                    String[] fn = getFeatureNames(parameters);
-                    for (int i = 1; i < fn.length; i++) {
-                        if (parameters.skipColumns != null && parameters.skipColumns[i]) continue;
-                        sb.append(",\"").append(fn[i].replace(' ', '_').replace('\n', '_').replace('"', '_')).append('"');
-                    }
-                    filewriter.println(sb.toString());
-                    for (Post post : posts) {
-                        if (n++ % 20000 == 0) System.out.println("save features " + file.getName() + " " + n);
-                        fillFeatures(f, post, parameters);
-                        f[0] = Math.floor(post.loglikes * parameters.logScale);
-                        sb = new StringBuilder();
-                        sb.append(post.id);
-                        sb.append(',').append(post.groupid);
-                        sb.append(',').append(post.likes);
-                        for (int i = 0; i < f.length; i++) {
-                            if (parameters.skipColumns != null && parameters.skipColumns[i] && i > 0) continue;
-                            double v = f[i];
-                            sb.append(',');
-                            if (v == 0.0) {
-                                sb.append('0');
-                            } else {
-                                if (Double.isInfinite(v) || Double.isNaN(v))
-                                    throw new RuntimeException("Infinite " + post.id + " " + i + " " + fn[i]);
-                                double fv = Math.rint(v);
-                                if (fv == v && Math.abs(v)<2e9) {
-                                    sb.append((int) fv);
-                                } else {
-                                    sb.append(v);
-                                }
-                            }
-                        }
-                        filewriter.println(sb.toString());
-                    }
-                }
-            }
-        };
-
-        abstract void saveFeatures(Collection<Post> posts, Parameters parameters, File file) throws IOException;
     }
 
     private static void savePredictor(Predictor predictor) throws IOException {
@@ -796,84 +602,157 @@ public class App {
         return fn;
     }
 
-    interface Predictor extends Serializable {
-        double predict(Post post);
-    }
 
-    static class LinearPredictor implements Predictor {
-        private final DoubleMatrix theta;
-        private final DoubleMatrix mean;
-        private final DoubleMatrix spread;
-        private final Parameters parameters;
+    private static Predictor trainNN(Collection<Post> posts, Parameters parameters, String trainId,
+                                     Map<Integer, Post> testPosts, Predictor initialPred, int epochNum,
+                                     final Map<Integer, Predictor> groupPred, int groupPredKey) {
 
-        LinearPredictor(DoubleMatrix theta, DoubleMatrix mean, DoubleMatrix spread, Parameters parameters) {
-            this.theta = theta;
-            this.mean = mean;
-            this.spread = spread;
-            this.parameters = parameters;
+        int pn = 0;
+
+
+        double[] f = new double[parameters.featuresLength];
+
+        double learningRate = parameters.learningRate;
+        int minibatchSize = parameters.minibatchSize;
+        if (minibatchSize > posts.size()) {
+            minibatchSize = posts.size();
         }
 
-        @Override
-        public double predict(Post post) {
-            double[] f = new double[parameters.featuresLength];
-            fillFeatures(f, post, parameters);
-            DoubleMatrix X = new DoubleMatrix(f).sub(mean).div(spread);
-            double logRes = X.mul(theta).sum();
-            double res = Math.exp(logRes) - 1;
-            if (res < 0) res = 0;
-            return res;
+        int epoch = 0;
+
+        int maxbatchSize = parameters.maxbatchSize;
+        if (maxbatchSize > posts.size()) maxbatchSize = posts.size();
+        int maxrows = Integer.MAX_VALUE / parameters.featuresLength;
+        if (maxbatchSize > maxrows) maxbatchSize = maxrows;
+
+        BasicNetwork network;
+
+        if (initialPred instanceof NNPredictor) {
+            network = (BasicNetwork) ((NNPredictor) initialPred).getNn().clone();
+        } else {
+            network = new BasicNetwork();
+            network.addLayer(new BasicLayer(null, true, 1));
+            for (int nnLayer : parameters.nnLayers) {
+                network.addLayer(new BasicLayer(new ActivationTANH(), true, nnLayer));
+            }
+            network.addLayer(new BasicLayer(new ActivationLinear(), false, 1));
+
+            network.getStructure().finalizeStructure();
+            network.reset();
+            new ConsistentRandomizer(-1, 1, 500).randomize(network);
 
         }
+        DoubleMatrix maxF = null;
+        DoubleMatrix minF = null;
+        DoubleMatrix sumF = null;
+        DoubleMatrix mean = null;
+        DoubleMatrix spread = null;
+        DoubleMatrix X;
+        DoubleMatrix Y;
+
+        ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
+        for (; epoch < epochNum; epoch++) {
+
+            Collections.shuffle(shuffledPosts, parameters.rnd);
+            pn = 0;
+
+
+            for (Post post : shuffledPosts) {
+
+                pn++;
+
+                X = new DoubleMatrix(minibatchSize, parameters.featuresLength);
+                Y = new DoubleMatrix(minibatchSize, 1);
+
+                f = new double[parameters.featuresLength];
+
+                fillFeatures(f, post, parameters);
+                if (epoch == 0) {
+                    if (maxF == null) {
+                        maxF = new DoubleMatrix(f);
+                        minF = new DoubleMatrix(f);
+                        sumF = new DoubleMatrix(f);
+                    } else {
+                        mean = new DoubleMatrix(f);
+                        maxF = maxF.max(mean);
+                        minF = minF.min(mean);
+                        sumF = sumF.add(mean);
+                    }
+                } else {
+                    double y = post.likes;
+
+                    int row = pn % minibatchSize;
+                    X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
+                    Y.put(row, 0, y);
+
+                    if (row + 1 == minibatchSize) {
+
+
+                        double[][] xa = X.toArray2();
+                        double[][] ya = Y.toArray2();
+                        BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
+                        Backpropagation train = new Backpropagation(network, trainingSet,
+                                parameters.learningRate, 0.9);
+                        train.fixFlatSpot(true);
+
+
+                        train.iteration(10);
+
+
+                    }
+
+                }
+            }
+
+            if (epoch == 0) {
+                int size = shuffledPosts.size();
+                mean = sumF.div(size);
+                spread = maxF.sub(minF);
+                for (int j = 0; j < parameters.featuresLength; j++) {
+                    double s = spread.get(j);
+                    if (s < 1e-6) {
+                        spread.put(j, 1);
+                        mean.put(j, 0);
+                    }
+                }
+
+
+            } else {
+                if (Math.abs(learningRate * parameters.learningRateFactor) < 1) {
+                    learningRate = learningRate * parameters.learningRateFactor;
+                }
+                if (parameters.minibatchFactor > 1.0) {
+                    minibatchSize = (int) Math.ceil(minibatchSize * parameters.minibatchFactor);
+                }
+                if (minibatchSize >= maxbatchSize) minibatchSize = maxbatchSize;
+                if (testPosts != null || groupPred != null) {
+                    try {
+                        NNPredictor predictor = new NNPredictor(network, mean, spread, parameters);
+                        if (groupPred != null) {
+                            synchronized (groupPred) {
+                                groupPred.put(groupPredKey, predictor);
+                            }
+                        }
+                        if (testPosts != null) {
+                            saveResults(predictor, posts, testPosts.values());
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+
+
+        }
+
+
+        return null;
     }
 
-    static class Parameters implements Serializable {
 
-
-        final public String imagesWeightFolder = System.getProperty("ok.imagedir");
-        final public String sentence2vecFile = System.getProperty("ok.sentence2vec");
-        public Map<Long, ImageWeight[]> imagesWeights;
-        final public boolean sortWords = Boolean.getBoolean("ok.sortWords");
-
-        final int wordLimit = Integer.getInteger("ok.wordlimit", 1000);
-        final int grouplimit = Integer.getInteger("ok.grouplimit", 100);
-        final int wordFreqLimit = Integer.getInteger("ok.wordfreqlimit", 10);
-        final int trigramFreqLimit = Integer.getInteger("ok.trigramfreqlimit", 100);
-        final int trigramLimit = Integer.getInteger("ok.trigramlimit", 1000);
-
-        public int bowDim;
-        public int trigramDim;
-        public int groupDim;
-        public int sentence2vecDim;
-        public final int timeDim = 24 + 7 + 12 + 10;
-        public int featuresLength = -1;
-        public long jan_01_2014;
-
-        TreeMap<Integer, DateStat> totalDateStat;
-        public List<String> words;
-        public List<String> trigrams;
-        public int[] groups;
-
-        double learningRate = getDoubleProperty("ok.learningRate", 0.1);
-        final double regularization = getDoubleProperty("ok.regularization", 0);
-        double learningRateFactor = getDoubleProperty("ok.learningRateFactor", 1);
-        int minibatchSize = Integer.getInteger("ok.minibatchSize", 10000);
-
-        final boolean noMapping = Boolean.getBoolean("ok.noMapping");
-        boolean tfidfBow = Boolean.getBoolean("ok.tfidf");
-        int maxbatchSize = Integer.getInteger("ok.maxbatchSize", 100000);
-        double minibatchFactor = getDoubleProperty("ok.minibatchFactor", 1);
-        public int imageDim = imagesWeightFolder == null ? 0 : 1000;
-        boolean[] skipColumns;
-        public ImageClass[] imgCls;
-        public final double logScale = getDoubleProperty("ok.logScale", 20);
-        public final boolean bigrams=Boolean.getBoolean("ok.bigrams");
-        public final Random rnd = new Random(Long.getLong("ok.seed", 42));
-    }
-
-
-    private static Predictor train(Collection<Post> posts, Parameters parameters, String trainId,
-                                   Map<Integer, Post> testPosts, Predictor initialPred, int epochNum,
-                                   final Map<Integer, Predictor> groupPred, int groupPredKey) {
+    private static Predictor trainLinear(Collection<Post> posts, Parameters parameters, String trainId,
+                                         Map<Integer, Post> testPosts, Predictor initialPred, int epochNum,
+                                         final Map<Integer, Predictor> groupPred, int groupPredKey) {
 
 
         int pn = 0;
@@ -899,9 +778,9 @@ public class App {
         DoubleMatrix spread = null;
         int epoch = 0;
         if (initialPred instanceof LinearPredictor) {
-            theta = ((LinearPredictor) initialPred).theta.dup();
-            spread = ((LinearPredictor) initialPred).spread.dup();
-            mean = ((LinearPredictor) initialPred).mean.dup();
+            theta = ((LinearPredictor) initialPred).getTheta().dup();
+            spread = ((LinearPredictor) initialPred).getSpread().dup();
+            mean = ((LinearPredictor) initialPred).getMean().dup();
             epoch = 1;
         }
 
@@ -1130,11 +1009,11 @@ public class App {
             i += parameters.imageDim;
         }
 
-        if(parameters.sentence2vecDim>0) {
-            if (post.sentence2vec!=null) {
+        if (parameters.sentence2vecDim > 0) {
+            if (post.sentence2vec != null) {
                 System.arraycopy(post.sentence2vec, 0, f, i, parameters.sentence2vecDim);
             }
-            i+=parameters.sentence2vecDim;
+            i += parameters.sentence2vecDim;
         }
 
         if (post.features != null) {
@@ -1299,10 +1178,6 @@ public class App {
         return false;
     }
 
-    private static double getDoubleProperty(String propertyName, double defaultValue) {
-        String val = System.getProperty(propertyName);
-        return val == null ? defaultValue : Double.valueOf(val);
-    }
 
     private static void computePostGroupTimeStat(Map<Integer, Post>... postss) {
         System.out.println("computePostGroupTimeStat");
@@ -1428,9 +1303,9 @@ public class App {
                                    boolean bigrams,
                                    Map<Integer, Post>... postss) throws IOException {
         russianStemmer stemmer = new org.tartarus.snowball.ext.russianStemmer();
-        BufferedWriter w1 = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_posts.txt"));
-        BufferedWriter wStem = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_postsStem.txt"));
-        BufferedWriter wLower = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_postsLower.txt"));
+//        BufferedWriter w1 = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_posts.txt"));
+//        BufferedWriter wStem = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_postsStem.txt"));
+//        BufferedWriter wLower = new BufferedWriter(new FileWriter("/Volumes/Apple/imgok_postsLower.txt"));
         for (Map<Integer, Post> posts : postss) {
 
 
@@ -1443,17 +1318,17 @@ public class App {
                 List<String> words = tokeniser.tokenize(post.txt);
 
                 HashSet<String> wordsSet = new HashSet<>();
-                List<String> wordsList = new ArrayList<>();
+                List<String> wordsList = new ArrayList<String>();
 
                 HashSet<String> trigramSet = new HashSet<>();
                 List<String> trigramList = new ArrayList<String>();
-                String prevword=null;
+                String prevword = null;
                 for (String word : words) {
                     String wl = word.toLowerCase();
                     String stem = stem(stemmer, wl);
-                    w1.write(word+" ");
-                    wStem.write(stem+" ");
-                    wLower.write(wl+" ");
+//                    w1.write(word + " ");
+//                    wStem.write(stem + " ");
+//                    wLower.write(wl + " ");
 
                     if (stem.length() < 2) {
                         prevword = null;
@@ -1462,12 +1337,12 @@ public class App {
                     wordsSet.add(stem);
                     wordsList.add(stem);
 
-                    if(bigrams && prevword!=null){
-                        String bigram=prevword+" "+stem;
+                    if (bigrams && prevword != null) {
+                        String bigram = prevword + " " + stem;
                         wordsSet.add(bigram);
                         wordsList.add(bigram);
                     }
-                    prevword=stem;
+                    prevword = stem;
 
                     String[] trigrams = getRusConsTrigrams(wl);
                     for (String trigram : trigrams) {
@@ -1491,16 +1366,16 @@ public class App {
                 post.wordsNum = words.size();
                 post.capsWord = getCapsWord(words);
 
-                w1.write("\n");
-                wStem.write("\n");
-                wLower.write("\n");
+//                w1.write("\n");
+//                wStem.write("\n");
+//                wLower.write("\n");
             }
 
 
         }
-        w1.close();
-        wStem.close();
-        wLower.close();
+//        w1.close();
+//        wStem.close();
+//        wLower.close();
     }
 
     private static int getWordStatTfMap(Map<String, WordStatTf> tfHashMapResult, Map<String, WordStat> wordStatHashMap, Post post, HashSet<String> wordsSet, List<String> wordsList) {
@@ -2006,32 +1881,32 @@ public class App {
     }
 
 
-    private static List<Post> findClosestSent2vec( Post post, int limit, Map<Integer, Post>... posts) {
-        HashMap<Integer,Double> mapsDistance=new HashMap<>();
+    private static List<Post> findClosestSent2vec(Post post, int limit, Map<Integer, Post>... posts) {
+        HashMap<Integer, Double> mapsDistance = new HashMap<>();
         double[] sentence2vec = post.sentence2vec;
-        double norm=0;
+        double norm = 0;
         for (int i = 0; i < sentence2vec.length; i++) {
-            norm+=sentence2vec[i]*sentence2vec[i];
+            norm += sentence2vec[i] * sentence2vec[i];
         }
-        norm=Math.sqrt(norm);
-        List<Post> sort=new ArrayList<>();
+        norm = Math.sqrt(norm);
+        List<Post> sort = new ArrayList<>();
         for (Map<Integer, Post> postMap : posts) {
             for (Map.Entry<Integer, Post> e : postMap.entrySet()) {
                 Post p = e.getValue();
-                double cos=0;
-                    double[] sentence2vec2 = p.sentence2vec;
+                double cos = 0;
+                double[] sentence2vec2 = p.sentence2vec;
                 for (int i = 0; i < sentence2vec.length; i++) {
-                    cos+= sentence2vec2[i] * sentence2vec[i];
+                    cos += sentence2vec2[i] * sentence2vec[i];
                 }
-                double norm2=0;
+                double norm2 = 0;
                 for (int i = 0; i < sentence2vec2.length; i++) {
-                    norm2+=sentence2vec2[i]*sentence2vec2[i];
+                    norm2 += sentence2vec2[i] * sentence2vec2[i];
                 }
-                norm2=Math.sqrt(norm2);
-                cos=cos/(norm * norm2);
+                norm2 = Math.sqrt(norm2);
+                cos = cos / (norm * norm2);
 
 
-                mapsDistance.put(p.id,cos);
+                mapsDistance.put(p.id, cos);
             }
             sort.addAll(postMap.values());
         }
@@ -2039,12 +1914,12 @@ public class App {
         Collections.sort(sort, new Comparator<Post>() {
             @Override
             public int compare(Post o1, Post o2) {
-                return Double.compare(mapsDistance.get(o2.id),mapsDistance.get(o1.id));
+                return Double.compare(mapsDistance.get(o2.id), mapsDistance.get(o1.id));
             }
         });
 
-        if(sort.size()>limit){
-            return new ArrayList<>(sort.subList(0,limit));
+        if (sort.size() > limit) {
+            return new ArrayList<>(sort.subList(0, limit));
         } else {
             return sort;
         }
