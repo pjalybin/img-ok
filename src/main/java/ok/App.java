@@ -146,16 +146,16 @@ public class App {
         }
 
         String nn = System.getProperty("ok.nn");
-        if(nn!=null){
-            String[] nns=nn.split(",");
-            int[] nnl=new int[nns.length];
+        if (nn != null) {
+            String[] nns = nn.split(",");
+            int[] nnl = new int[nns.length];
             for (int i = 0; i < nnl.length; i++) {
-                 nnl[i]=Integer.valueOf(nns[i].trim());
+                nnl[i] = Integer.valueOf(nns[i].trim());
             }
-            parameters.nnLayers=nnl;
+            parameters.nnLayers = nnl;
         }
 
-        Trainer trainer = parameters.nnLayers!=null ? new Trainer() {
+        Trainer trainer = parameters.nnLayers != null ? new Trainer() {
             @Override
             public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey, Collection<Post> dev) {
                 return trainNN(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey, dev);
@@ -340,7 +340,7 @@ public class App {
         double v2 = variance(y).sum();
         double r2 = v2 < 1e-6 ? 0 : (1 - v1 / v2) * 1000;
         double cost = MatrixFunctions.pow(sub, 2).sum() / i;
-        System.out.println("test R2 = " + r2+"\t Cost = " + cost);
+        System.out.println("test R2 = " + r2 + "\t Cost = " + cost);
         return new double[]{r2, cost};
     }
 
@@ -667,7 +667,7 @@ public class App {
             Collections.shuffle(shuffledPosts, parameters.rnd);
             pn = 0;
 
-            List<Post> nextPosts=new ArrayList<>(minibatchSize);
+            List<Post> nextPosts = new ArrayList<>(minibatchSize);
             for (Post post : shuffledPosts) {
 
                 pn++;
@@ -690,7 +690,7 @@ public class App {
 
                     double y = post.likes;
 
-                    int row = (pn-1) % minibatchSize;
+                    int row = (pn - 1) % minibatchSize;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 
@@ -708,7 +708,7 @@ public class App {
 
 
                         train.fixFlatSpot(true);
-                        if(state!=null){
+                        if (state != null) {
                             train.resume(state);
                         }
 
@@ -716,8 +716,8 @@ public class App {
 
 
                         double error = train.getError();
-                        System.out.println("\t\t\t"+trainId + " epoch=" + epoch + " error=" + error);
-                        if(initialPred==null && dev!=null){
+                        System.out.println("\t\t\t" + trainId + " epoch=" + epoch + " n=" + pn + " error=" + error);
+                        if (initialPred == null && dev != null) {
                             test(dev, new NNPredictor(network, mean, spread, parameters, state));
                         }
 
@@ -852,7 +852,7 @@ public class App {
                 } else {
                     double y = post.loglikes;
 
-                    int row = (pn-1) % minibatchSize;
+                    int row = (pn - 1) % minibatchSize;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 
