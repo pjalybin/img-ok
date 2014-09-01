@@ -53,9 +53,12 @@ class Parameters implements Serializable {
     public final boolean bigrams=Boolean.getBoolean("ok.bigrams");
     public final Random rnd = new Random(Long.getLong("ok.seed", 42));
 
-    int[] nnLayers=null;
+    public int[] nnLayers=null;
+    public final double nnMomentum = getDoubleProperty("ok.nn.momentum", 0);
+    public final int nnIter = Integer.getInteger("ok.nn.iter", 1);
 
     public final double devSetFrac = getDoubleProperty("ok.devset", 0.2);
+
 
     private double getDoubleProperty(String propertyName, double defaultValue) {
         String val = System.getProperty(propertyName);

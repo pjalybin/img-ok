@@ -38,7 +38,7 @@ public class App {
             parameters.sentence2vecDim = readSentence2vec(new File(parameters.sentence2vecFile), posts, testPosts);
         }
 
-        printSent2vecClosestPosts(posts, testPosts, 100);
+        // printSent2vecClosestPosts(posts, testPosts, 100);
 
         readLikes(posts);
 
@@ -626,9 +626,21 @@ public class App {
         if (maxbatchSize > maxrows) maxbatchSize = maxrows;
 
         BasicNetwork network;
+        DoubleMatrix maxF = null;
+        DoubleMatrix minF = null;
+        DoubleMatrix sumF = null;
+        DoubleMatrix mean = null;
+        DoubleMatrix spread = null;
+        DoubleMatrix X;
+        DoubleMatrix Y;
+
 
         if (initialPred instanceof NNPredictor) {
-            network = (BasicNetwork) ((NNPredictor) initialPred).getNn().clone();
+            NNPredictor nnPredictor = (NNPredictor) initialPred;
+            network = (BasicNetwork) nnPredictor.getNn().clone();
+            mean = nnPredictor.getMean();
+            spread = nnPredictor.getSpread();
+            epoch = 1;
         } else {
             network = new BasicNetwork();
             network.addLayer(new BasicLayer(null, false, parameters.featuresLength));
@@ -642,13 +654,8 @@ public class App {
             new ConsistentRandomizer(-1, 1, 500).randomize(network);
 
         }
-        DoubleMatrix maxF = null;
-        DoubleMatrix minF = null;
-        DoubleMatrix sumF = null;
-        DoubleMatrix mean = null;
-        DoubleMatrix spread = null;
-        DoubleMatrix X;
-        DoubleMatrix Y;
+        X = new DoubleMatrix(minibatchSize, parameters.featuresLength);
+        Y = new DoubleMatrix(minibatchSize, 1);
 
         ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
         for (; epoch < epochNum; epoch++) {
@@ -656,14 +663,10 @@ public class App {
             Collections.shuffle(shuffledPosts, parameters.rnd);
             pn = 0;
 
-
+            List<Post> nextPosts=new ArrayList<>(minibatchSize);
             for (Post post : shuffledPosts) {
 
                 pn++;
-
-                X = new DoubleMatrix(minibatchSize, parameters.featuresLength);
-                Y = new DoubleMatrix(minibatchSize, 1);
-
                 f = new double[parameters.featuresLength];
 
                 fillFeatures(f, post, parameters);
@@ -679,25 +682,35 @@ public class App {
                         sumF = sumF.add(mean);
                     }
                 } else {
+                    nextPosts.add(post);
+
                     double y = post.likes;
 
-                    int row = pn % minibatchSize;
+                    int row = (pn-1) % minibatchSize;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 
                     if (row + 1 == minibatchSize) {
 
+                        if(initialPred==null){
+                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
+                            test(nextPosts, new NNPredictor(network, mean, spread, parameters));
+                        }
 
                         double[][] xa = X.toArray2();
                         double[][] ya = Y.toArray2();
                         BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
                         Backpropagation train = new Backpropagation(network, trainingSet,
-                                parameters.learningRate, 0.9);
+                                parameters.learningRate, parameters.nnMomentum);
                         train.fixFlatSpot(true);
 
 
-                        train.iteration(10);
+                        train.iteration(parameters.nnIter);
 
+                        double error = train.getError();
+                        System.out.println("Epoch #" + epoch + " Error:" + error);
+
+                        nextPosts.clear();
 
                     }
 
@@ -746,7 +759,7 @@ public class App {
         }
 
 
-        return null;
+        return new NNPredictor(network, mean, spread, parameters);
     }
 
 
@@ -825,7 +838,7 @@ public class App {
                 } else {
                     double y = post.loglikes;
 
-                    int row = pn % minibatchSize;
+                    int row = (pn-1) % minibatchSize;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 

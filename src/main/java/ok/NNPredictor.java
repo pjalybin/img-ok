@@ -33,4 +33,12 @@ public class NNPredictor implements Predictor {
     public BasicNetwork getNn() {
         return nn;
     }
+
+    public DoubleMatrix getMean() {
+        return mean;
+    }
+
+    public DoubleMatrix getSpread() {
+        return spread;
+    }
 }
