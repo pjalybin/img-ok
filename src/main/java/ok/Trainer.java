@@ -11,5 +11,5 @@ public interface Trainer {
 
    Predictor train(Collection<Post> posts, Parameters parameters, String trainId,
                                    Map<Integer, Post> testPosts, Predictor initialPred, int epochNum,
-                                   final Map<Integer, Predictor> groupPred, int groupPredKey);
+                                   final Map<Integer, Predictor> groupPred, int groupPredKey, Collection<Post> devCrossvalidation);
 }

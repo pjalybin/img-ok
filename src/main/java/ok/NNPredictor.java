@@ -1,6 +1,7 @@
 package ok;
 
 import org.encog.neural.networks.BasicNetwork;
+import org.encog.neural.networks.training.propagation.TrainingContinuation;
 import org.jblas.DoubleMatrix;
 
 /**
@@ -12,12 +13,14 @@ public class NNPredictor implements Predictor {
     private final DoubleMatrix spread;
     private final BasicNetwork nn;
     private final Parameters parameters;
+    private final TrainingContinuation state;
 
-    public NNPredictor(BasicNetwork network, DoubleMatrix mean, DoubleMatrix spread, Parameters parameters) {
+    public NNPredictor(BasicNetwork network, DoubleMatrix mean, DoubleMatrix spread, Parameters parameters, TrainingContinuation state) {
         this.nn = network;
         this.mean = mean;
         this.spread = spread;
         this.parameters = parameters;
+        this.state = state;
     }
 
     @Override
@@ -40,5 +43,9 @@ public class NNPredictor implements Predictor {
 
     public DoubleMatrix getSpread() {
         return spread;
+    }
+
+    public TrainingContinuation getState() {
+        return state;
     }
 }

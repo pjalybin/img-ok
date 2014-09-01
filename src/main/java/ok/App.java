@@ -7,6 +7,7 @@ import org.encog.mathutil.randomize.ConsistentRandomizer;
 import org.encog.ml.data.basic.BasicMLDataSet;
 import org.encog.neural.networks.BasicNetwork;
 import org.encog.neural.networks.layers.BasicLayer;
+import org.encog.neural.networks.training.propagation.TrainingContinuation;
 import org.encog.neural.networks.training.propagation.back.Backpropagation;
 import org.jblas.ComplexDoubleMatrix;
 import org.jblas.DoubleMatrix;
@@ -156,12 +157,12 @@ public class App {
 
         Trainer trainer = parameters.nnLayers!=null ? new Trainer() {
             @Override
-            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey) {
-                return trainNN(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey);
+            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey, Collection<Post> dev) {
+                return trainNN(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey, dev);
             }
         } : new Trainer() {
             @Override
-            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey) {
+            public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey, Collection<Post> dev) {
                 return trainLinear(posts, parameters, trainId, testPosts, initialPred, epochNum, groupPred, groupPredKey);
             }
         };
@@ -257,7 +258,7 @@ public class App {
                                             final Map<Integer, List<Post>> groups,
                                             Trainer trainer) throws IOException {
         final Predictor predictorAll = trainer.train(train, parameters, "all", testPosts, null,
-                Integer.getInteger("ok.epochnum2", 5), null, 0);
+                Integer.getInteger("ok.epochnum2", 5), null, 0, dev);
 
 
         test(dev, predictorAll);
@@ -274,7 +275,7 @@ public class App {
                     int g = e.getKey();
                     List<Post> po = e.getValue();
                     Predictor predictor = trainer.train(po, parameters, "Group" + g, null, predictorAll,
-                            Integer.getInteger("ok.epochnum", 100), groupPred, g);
+                            Integer.getInteger("ok.epochnum", 100), groupPred, g, dev);
                     synchronized (groupPred) {
                         groupPred.put(g, predictor);
                     }
@@ -339,8 +340,7 @@ public class App {
         double v2 = variance(y).sum();
         double r2 = v2 < 1e-6 ? 0 : (1 - v1 / v2) * 1000;
         double cost = MatrixFunctions.pow(sub, 2).sum() / i;
-        System.out.println("test R2 = " + r2);
-        System.out.println("test Cost = " + cost);
+        System.out.println("test R2 = " + r2+"\t Cost = " + cost);
         return new double[]{r2, cost};
     }
 
@@ -605,12 +605,13 @@ public class App {
 
     private static Predictor trainNN(Collection<Post> posts, Parameters parameters, String trainId,
                                      Map<Integer, Post> testPosts, Predictor initialPred, int epochNum,
-                                     final Map<Integer, Predictor> groupPred, int groupPredKey) {
+                                     final Map<Integer, Predictor> groupPred, int groupPredKey,
+                                     Collection<Post> dev) {
 
-        int pn = 0;
+        int pn;
 
 
-        double[] f = new double[parameters.featuresLength];
+        double[] f;
 
         double learningRate = parameters.learningRate;
         int minibatchSize = parameters.minibatchSize;
@@ -634,16 +635,18 @@ public class App {
         DoubleMatrix X;
         DoubleMatrix Y;
 
+        TrainingContinuation state = null;
 
         if (initialPred instanceof NNPredictor) {
             NNPredictor nnPredictor = (NNPredictor) initialPred;
             network = (BasicNetwork) nnPredictor.getNn().clone();
             mean = nnPredictor.getMean();
             spread = nnPredictor.getSpread();
+            state = nnPredictor.getState();
             epoch = 1;
         } else {
             network = new BasicNetwork();
-            network.addLayer(new BasicLayer(null, false, parameters.featuresLength));
+            network.addLayer(new BasicLayer(null, true, parameters.featuresLength));
             for (int nnLayer : parameters.nnLayers) {
                 network.addLayer(new BasicLayer(new ActivationTANH(), true, nnLayer));
             }
@@ -658,6 +661,7 @@ public class App {
         Y = new DoubleMatrix(minibatchSize, 1);
 
         ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
+
         for (; epoch < epochNum; epoch++) {
 
             Collections.shuffle(shuffledPosts, parameters.rnd);
@@ -692,23 +696,33 @@ public class App {
 
                     if (row + 1 == minibatchSize) {
 
-                        if(initialPred==null){
-                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
-                            test(nextPosts, new NNPredictor(network, mean, spread, parameters));
-                        }
+//                        if(initialPred==null){
+//                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
+//                            test(nextPosts, new NNPredictor(network, mean, spread, parameters));
+//                        }
 
                         double[][] xa = X.toArray2();
                         double[][] ya = Y.toArray2();
                         BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
-                        Backpropagation train = new Backpropagation(network, trainingSet,
-                                parameters.learningRate, parameters.nnMomentum);
-                        train.fixFlatSpot(true);
+                        Backpropagation train = new Backpropagation(network, trainingSet, learningRate, parameters.nnMomentum);
 
+
+                        train.fixFlatSpot(true);
+                        if(state!=null){
+                            train.resume(state);
+                        }
 
                         train.iteration(parameters.nnIter);
 
-                        double error = train.getError();
-                        System.out.println("Epoch #" + epoch + " Error:" + error);
+
+//                        double error = train.getError();
+//                        System.out.println(trainId + " epoch=" + epoch + " error=" + error);
+                        if(initialPred==null && dev!=null){
+                            test(dev, new NNPredictor(network, mean, spread, parameters, state));
+                        }
+
+
+                        state = train.pause();
 
                         nextPosts.clear();
 
@@ -740,7 +754,7 @@ public class App {
                 if (minibatchSize >= maxbatchSize) minibatchSize = maxbatchSize;
                 if (testPosts != null || groupPred != null) {
                     try {
-                        NNPredictor predictor = new NNPredictor(network, mean, spread, parameters);
+                        NNPredictor predictor = new NNPredictor(network, mean, spread, parameters, state);
                         if (groupPred != null) {
                             synchronized (groupPred) {
                                 groupPred.put(groupPredKey, predictor);
@@ -759,7 +773,7 @@ public class App {
         }
 
 
-        return new NNPredictor(network, mean, spread, parameters);
+        return new NNPredictor(network, mean, spread, parameters, state);
     }
 
 
