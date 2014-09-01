@@ -714,9 +714,14 @@ public class App {
 
                         train.iteration(parameters.nnIter);
 
-
                         double error = train.getError();
-                        System.out.println("\t\t\t" + trainId + " epoch=" + epoch + " n=" + pn + " error=" + error);
+
+                        System.out.println("\t\t\t" + trainId
+                                + "\tepoch=" + epoch
+                                + "\tn=" + pn
+                                + "\tlr="+learningRate
+                                + "\t\terror=" + error
+                        );
                         if (initialPred == null && dev != null) {
                             test(dev, new NNPredictor(network, mean, spread, parameters, state));
                         }
