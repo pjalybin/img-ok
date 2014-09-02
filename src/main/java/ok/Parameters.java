@@ -56,6 +56,7 @@ class Parameters implements Serializable {
     public int[] nnLayers=null;
     public final double nnMomentum = getDoubleProperty("ok.nn.momentum", 0);
     public final int nnIter = Integer.getInteger("ok.nn.iter", 1);
+    public final int nnBatch = Integer.getInteger("ok.nn.batch", 10000);
 
     public final double devSetFrac = getDoubleProperty("ok.devset", 0.2);
 
