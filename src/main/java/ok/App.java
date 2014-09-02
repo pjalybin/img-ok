@@ -657,8 +657,8 @@ public class App {
             new ConsistentRandomizer(-1, 1, 500).randomize(network);
 
         }
-        X = new DoubleMatrix(minibatchSize, parameters.featuresLength);
-        Y = new DoubleMatrix(minibatchSize, 1);
+        X = new DoubleMatrix(parameters.nnBatch, parameters.featuresLength);
+        Y = new DoubleMatrix(parameters.nnBatch, 1);
 
         ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
 
@@ -667,7 +667,6 @@ public class App {
             Collections.shuffle(shuffledPosts, parameters.rnd);
             pn = 0;
 
-            List<Post> nextPosts = new ArrayList<>(minibatchSize);
             for (Post post : shuffledPosts) {
 
                 pn++;
@@ -686,15 +685,13 @@ public class App {
                         sumF = sumF.add(mean);
                     }
                 } else {
-                    nextPosts.add(post);
-
                     double y = post.likes;
 
-                    int row = (pn - 1) % minibatchSize;
+                    int row = (pn - 1) % parameters.nnBatch;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 
-                    if (row + 1 == minibatchSize) {
+                    if (row + 1 == parameters.nnBatch) {
 
 //                        if(initialPred==null){
 //                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
@@ -705,8 +702,7 @@ public class App {
                         double[][] ya = Y.toArray2();
                         BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
                         Backpropagation train = new Backpropagation(network, trainingSet, learningRate, parameters.nnMomentum);
-
-
+                        train.setBatchSize(minibatchSize);
                         train.fixFlatSpot(true);
                         if (state != null) {
                             train.resume(state);
@@ -720,6 +716,7 @@ public class App {
                                 + "\tepoch=" + epoch
                                 + "\tn=" + pn
                                 + "\tlr="+learningRate
+                                + "\tmb="+minibatchSize
                                 + "\t\terror=" + error
                         );
                         if (initialPred == null && dev != null) {
@@ -729,7 +726,6 @@ public class App {
 
                         state = train.pause();
 
-                        nextPosts.clear();
 
                     }
 
