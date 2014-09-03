@@ -43,6 +43,7 @@ public class NNPredictor implements Predictor {
         App.fillFeatures(f, post, parameters);
         DoubleVector x = new DenseDoubleVector(f).subtract(mean).divide(spread);
         double y = nn.predict(x).get(0);
+        if(y<0)y=0;
         return y;
     }
 
