@@ -660,12 +660,19 @@ public class App {
         X = new DoubleMatrix(parameters.nnBatch, parameters.featuresLength);
         Y = new DoubleMatrix(parameters.nnBatch, 1);
 
+        BasicNetwork savedNetwork;
+        TrainingContinuation savedState;
+
         ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
 
-        for (; epoch < epochNum; epoch++) {
+        epochCycle: for (; epoch < epochNum; epoch++) {
 
             Collections.shuffle(shuffledPosts, parameters.rnd);
             pn = 0;
+
+            savedNetwork = (BasicNetwork)network.clone();
+            savedState = state;
+
 
             for (Post post : shuffledPosts) {
 
@@ -712,19 +719,35 @@ public class App {
 
                         double error = train.getError();
 
-                        System.out.println("\t\t\t" + trainId
-                                + "\tepoch=" + epoch
-                                + "\tn=" + pn
-                                + "\tlr="+learningRate
-                                + "\tmb="+minibatchSize
-                                + "\t\terror=" + error
-                        );
-                        if (initialPred == null && dev != null) {
-                            test(dev, new NNPredictor(network, mean, spread, parameters, state));
+                        if(error==Double.NaN) {
+
+                            learningRate = learningRate/Math.sqrt(10);
+                            System.out.println("error=NaN, decreasing learningRate:="+learningRate);
+                            state = savedState;
+                            network = savedNetwork;
+
+                            epoch = 1;
+
+                            continue epochCycle;
+
+
+
+                        } else {
+
+                            System.out.println("\t\t\t" + trainId
+                                            + "\tepoch=" + epoch
+                                            + "\tn=" + pn
+                                            + "\tlr=" + learningRate
+                                            + "\tmb=" + minibatchSize
+                                            + "\t\terror=" + error
+                            );
+                            if (initialPred == null && dev != null) {
+                                test(dev, new NNPredictor(network, mean, spread, parameters, state));
+                            }
+
+
+                            state = train.pause();
                         }
-
-
-                        state = train.pause();
 
 
                     }
