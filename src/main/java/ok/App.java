@@ -2,6 +2,7 @@ package ok;
 
 import au.com.bytecode.opencsv.CSVReader;
 import org.encog.engine.network.activation.ActivationLinear;
+import org.encog.engine.network.activation.ActivationSoftMax;
 import org.encog.engine.network.activation.ActivationTANH;
 import org.encog.mathutil.randomize.ConsistentRandomizer;
 import org.encog.ml.data.basic.BasicMLDataSet;
@@ -615,16 +616,20 @@ public class App {
 
         double learningRate = parameters.learningRate;
         int minibatchSize = parameters.minibatchSize;
-        if (minibatchSize > posts.size()) {
-            minibatchSize = posts.size();
+        final int postsSize = posts.size();
+        if (minibatchSize > postsSize) {
+            minibatchSize = postsSize;
         }
 
         int epoch = 0;
 
         int maxbatchSize = parameters.maxbatchSize;
-        if (maxbatchSize > posts.size()) maxbatchSize = posts.size();
+        if (maxbatchSize > postsSize) maxbatchSize = postsSize;
         int maxrows = Integer.MAX_VALUE / parameters.featuresLength;
         if (maxbatchSize > maxrows) maxbatchSize = maxrows;
+
+        int nnBatch = parameters.nnBatch;
+        if(nnBatch > maxbatchSize) nnBatch = maxbatchSize;
 
         BasicNetwork network;
         DoubleMatrix maxF = null;
@@ -657,8 +662,8 @@ public class App {
             new ConsistentRandomizer(-1, 1, 500).randomize(network);
 
         }
-        X = new DoubleMatrix(parameters.nnBatch, parameters.featuresLength);
-        Y = new DoubleMatrix(parameters.nnBatch, 1);
+        X = new DoubleMatrix(nnBatch, parameters.featuresLength);
+        Y = new DoubleMatrix(nnBatch, 1);
 
         BasicNetwork savedNetwork;
         TrainingContinuation savedState;
@@ -694,11 +699,11 @@ public class App {
                 } else {
                     double y = post.likes;
 
-                    int row = (pn - 1) % parameters.nnBatch;
+                    int row = (pn - 1) % nnBatch;
                     X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
                     Y.put(row, 0, y);
 
-                    if (row + 1 == parameters.nnBatch) {
+                    if (row + 1 == nnBatch || pn == postsSize) {
 
 //                        if(initialPred==null){
 //                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
@@ -719,7 +724,7 @@ public class App {
 
                         double error = train.getError();
 
-                        if(error==Double.NaN) {
+                        if(error==Double.NaN || error>1e9) {
 
                             learningRate = learningRate/Math.sqrt(10);
                             System.out.println("error=NaN, decreasing learningRate:="+learningRate);
