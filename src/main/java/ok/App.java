@@ -705,11 +705,6 @@ public class App {
 
                     if (row + 1 == nnBatch || pn == postsSize) {
 
-//                        if(initialPred==null){
-//                            System.out.println("nn "+trainId+" epoch="+epoch+" p="+pn);
-//                            test(nextPosts, new NNPredictor(network, mean, spread, parameters));
-//                        }
-
                         double[][] xa = X.toArray2();
                         double[][] ya = Y.toArray2();
                         BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
@@ -727,7 +722,7 @@ public class App {
                         if(error==Double.NaN || error>1e9) {
 
                             learningRate = learningRate/Math.sqrt(10);
-                            System.out.println("error=NaN, decreasing learningRate:="+learningRate);
+                            System.out.println(trainId+" error=NaN, decreasing learningRate:="+learningRate);
                             state = savedState;
                             network = savedNetwork;
 
