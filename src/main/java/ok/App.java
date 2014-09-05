@@ -718,7 +718,7 @@ public class App {
                     if (row + 1 == nnBatch || pn == postsSize) {
 
                         network.train(X,Y);
-
+                        System.out.println(trainId+" e="+epoch+" n="+pn);
                         if (initialPred == null && dev != null) {
                             test(dev, new NNPredictor(network, mean, spread, parameters));
                         }
