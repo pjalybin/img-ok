@@ -1,51 +1,61 @@
 package ok;
 
-import org.encog.neural.networks.BasicNetwork;
-import org.encog.neural.networks.training.propagation.TrainingContinuation;
-import org.jblas.DoubleMatrix;
+import de.jungblut.classification.nn.MultilayerPerceptron;
+import de.jungblut.math.DoubleVector;
+import de.jungblut.math.dense.DenseDoubleVector;
+
+import java.io.*;
 
 /**
  * @author Petr Zhalybin
  * @since 31.08.2014 14:14
  */
 public class NNPredictor implements Predictor {
-    private final DoubleMatrix mean;
-    private final DoubleMatrix spread;
-    private final BasicNetwork nn;
+    private final DoubleVector mean;
+    private final DoubleVector spread;
+    private final MultilayerPerceptron nn;
     private final Parameters parameters;
-    private final TrainingContinuation state;
 
-    public NNPredictor(BasicNetwork network, DoubleMatrix mean, DoubleMatrix spread, Parameters parameters, TrainingContinuation state) {
+    public NNPredictor(MultilayerPerceptron network, DoubleVector mean, DoubleVector spread, Parameters parameters) {
         this.nn = network;
         this.mean = mean;
         this.spread = spread;
         this.parameters = parameters;
-        this.state = state;
+    }
+
+    public NNPredictor clone(){
+            try(ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                ObjectOutputStream stream = new ObjectOutputStream(bytes)) {
+                MultilayerPerceptron.serialize(nn, stream);
+                try(DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+                    MultilayerPerceptron copy = MultilayerPerceptron.deserialize(in);
+                    NNPredictor clone = new NNPredictor(copy,mean,spread,parameters);
+                    return clone;
+                }
+            } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public double predict(Post post) {
         double[] f = new double[parameters.featuresLength];
         App.fillFeatures(f, post, parameters);
-        DoubleMatrix x = new DoubleMatrix(f).sub(mean).div(spread);
-        double[] y = new double[1];
-        nn.compute(x.data,y);
-        return y[0];
+        DoubleVector x = new DenseDoubleVector(f).subtract(mean).divide(spread);
+        double y = nn.predict(x).get(0);
+        return y;
     }
 
-    public BasicNetwork getNn() {
+    public MultilayerPerceptron getNn() {
         return nn;
     }
 
-    public DoubleMatrix getMean() {
+    public DoubleVector getMean() {
         return mean;
     }
 
-    public DoubleMatrix getSpread() {
+    public DoubleVector getSpread() {
         return spread;
     }
 
-    public TrainingContinuation getState() {
-        return state;
-    }
 }

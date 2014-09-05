@@ -76,9 +76,9 @@
         </dependency>
 
         <dependency>
-            <groupId>org.encog</groupId>
-            <artifactId>encog-core</artifactId>
-            <version>3.2.0</version>
+            <groupId>de.jungblut.common</groupId>
+            <artifactId>thomasjungblut-common</artifactId>
+            <version>1.0</version>
         </dependency>
 
     </dependencies>

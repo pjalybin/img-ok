@@ -1,15 +1,16 @@
 package ok;
 
 import au.com.bytecode.opencsv.CSVReader;
-import org.encog.engine.network.activation.ActivationLinear;
-import org.encog.engine.network.activation.ActivationSoftMax;
-import org.encog.engine.network.activation.ActivationTANH;
-import org.encog.mathutil.randomize.ConsistentRandomizer;
-import org.encog.ml.data.basic.BasicMLDataSet;
-import org.encog.neural.networks.BasicNetwork;
-import org.encog.neural.networks.layers.BasicLayer;
-import org.encog.neural.networks.training.propagation.TrainingContinuation;
-import org.encog.neural.networks.training.propagation.back.Backpropagation;
+import de.jungblut.classification.nn.MultilayerPerceptron;
+import de.jungblut.math.DoubleVector;
+import de.jungblut.math.activation.ActivationFunction;
+import de.jungblut.math.activation.LinearActivationFunction;
+import de.jungblut.math.activation.TanhActivationFunction;
+import de.jungblut.math.dense.DenseDoubleVector;
+import de.jungblut.math.dense.SingleEntryDoubleVector;
+import de.jungblut.math.minimize.Fmincg;
+import de.jungblut.math.sparse.SparseDoubleVector;
+import de.jungblut.math.squashing.SquaredMeanErrorFunction;
 import org.jblas.ComplexDoubleMatrix;
 import org.jblas.DoubleMatrix;
 import org.jblas.Eigen;
@@ -629,61 +630,66 @@ public class App {
         if (maxbatchSize > maxrows) maxbatchSize = maxrows;
 
         int nnBatch = parameters.nnBatch;
-        if(nnBatch > maxbatchSize) nnBatch = maxbatchSize;
+        if(nnBatch>postsSize)nnBatch = postsSize;
 
-        BasicNetwork network;
+        MultilayerPerceptron network;
         DoubleMatrix maxF = null;
         DoubleMatrix minF = null;
         DoubleMatrix sumF = null;
-        DoubleMatrix mean = null;
-        DoubleMatrix spread = null;
-        DoubleMatrix X;
-        DoubleMatrix Y;
+        DoubleVector mean = null;
+        DoubleVector spread = null;
+        DoubleVector[] X;
+        DoubleVector[] Y;
 
-        TrainingContinuation state = null;
 
         if (initialPred instanceof NNPredictor) {
-            NNPredictor nnPredictor = (NNPredictor) initialPred;
-            network = (BasicNetwork) nnPredictor.getNn().clone();
+            NNPredictor nnPredictor = ((NNPredictor) initialPred).clone();
+            network = nnPredictor.getNn();
             mean = nnPredictor.getMean();
             spread = nnPredictor.getSpread();
-            state = nnPredictor.getState();
+
             epoch = 1;
         } else {
-            network = new BasicNetwork();
-            network.addLayer(new BasicLayer(null, true, parameters.featuresLength));
-            for (int nnLayer : parameters.nnLayers) {
-                network.addLayer(new BasicLayer(new ActivationTANH(), true, nnLayer));
+            int[] layers=new int[parameters.nnLayers.length+2];
+            ActivationFunction[] activations = new ActivationFunction[layers.length];
+            for (int i = 0; i < layers.length; i++) {
+                if(i == 0) {
+                    layers[i]=parameters.featuresLength;
+                    activations[i] = new LinearActivationFunction();
+                } else if(i + 1 == layers.length) {
+                    layers[i]=1;
+                    activations[i] = new LinearActivationFunction();
+                } else {
+                    layers[i] = parameters.nnLayers[i-1];
+                    activations[i] = new TanhActivationFunction();
+                }
             }
-            network.addLayer(new BasicLayer(new ActivationLinear(), false, 1));
 
-            network.getStructure().finalizeStructure();
-            network.reset();
-            new ConsistentRandomizer(-1, 1, 500).randomize(network);
+            network = MultilayerPerceptron.MultilayerPerceptronBuilder.create(
+                    layers,
+                    activations,
+                    new SquaredMeanErrorFunction(),
+                    new Fmincg(),
+                    epochNum
+            )
+                    .lambda(parameters.regularization)
+                    .verbose(true)
+                    .miniBatchSize(minibatchSize)
+                    .build();
 
         }
-        X = new DoubleMatrix(nnBatch, parameters.featuresLength);
-        Y = new DoubleMatrix(nnBatch, 1);
 
-        BasicNetwork savedNetwork;
-        TrainingContinuation savedState;
+        X = new DoubleVector[nnBatch];
+        Y = new DoubleVector[nnBatch];
 
         ArrayList<Post> shuffledPosts = new ArrayList<>(posts);
 
         epochCycle: for (; epoch < epochNum; epoch++) {
-
             Collections.shuffle(shuffledPosts, parameters.rnd);
             pn = 0;
-
-            savedNetwork = (BasicNetwork)network.clone();
-            savedState = state;
-
-
             for (Post post : shuffledPosts) {
-
                 pn++;
                 f = new double[parameters.featuresLength];
-
                 fillFeatures(f, post, parameters);
                 if (epoch == 0) {
                     if (maxF == null) {
@@ -691,83 +697,48 @@ public class App {
                         minF = new DoubleMatrix(f);
                         sumF = new DoubleMatrix(f);
                     } else {
-                        mean = new DoubleMatrix(f);
-                        maxF = maxF.max(mean);
-                        minF = minF.min(mean);
-                        sumF = sumF.add(mean);
+                        DoubleMatrix m = new DoubleMatrix(f);
+                        maxF = maxF.max(m);
+                        minF = minF.min(m);
+                        sumF = sumF.add(m);
                     }
                 } else {
                     double y = post.likes;
 
-                    int row = (pn - 1) % nnBatch;
-                    X.putRow(row, new DoubleMatrix(f).sub(mean).div(spread));
-                    Y.put(row, 0, y);
+                    int row = 0;
+                    try {
+                        row = (pn - 1) % nnBatch;
+                        X[row] = new SparseDoubleVector(f).subtract(mean).divide(spread);
+                        Y[row] = new SingleEntryDoubleVector(y);
+                    } catch (OutOfMemoryError e) {
+                        System.err.println(pn);
+                        throw e;
+                    }
 
                     if (row + 1 == nnBatch || pn == postsSize) {
 
-                        double[][] xa = X.toArray2();
-                        double[][] ya = Y.toArray2();
-                        BasicMLDataSet trainingSet = new BasicMLDataSet(xa, ya);
-                        Backpropagation train = new Backpropagation(network, trainingSet, learningRate, parameters.nnMomentum);
-                        train.setBatchSize(minibatchSize);
-                        train.fixFlatSpot(true);
-                        if (state != null) {
-                            train.resume(state);
+                        network.train(X,Y);
+
+                        if (initialPred == null && dev != null) {
+                            test(dev, new NNPredictor(network, mean, spread, parameters));
                         }
-
-                        train.iteration(parameters.nnIter);
-
-                        double error = train.getError();
-
-                        if(error==Double.NaN || error>1e9) {
-
-                            learningRate = learningRate/Math.sqrt(10);
-                            System.out.println(trainId+" error=NaN, decreasing learningRate:="+learningRate);
-                            state = savedState;
-                            network = savedNetwork;
-
-                            epoch = 1;
-
-                            continue epochCycle;
-
-
-
-                        } else {
-
-                            System.out.println("\t\t\t" + trainId
-                                            + "\tepoch=" + epoch
-                                            + "\tn=" + pn
-                                            + "\tlr=" + learningRate
-                                            + "\tmb=" + minibatchSize
-                                            + "\t\terror=" + error
-                            );
-                            if (initialPred == null && dev != null) {
-                                test(dev, new NNPredictor(network, mean, spread, parameters, state));
-                            }
-
-
-                            state = train.pause();
-                        }
-
-
                     }
-
                 }
             }
 
             if (epoch == 0) {
                 int size = shuffledPosts.size();
-                mean = sumF.div(size);
-                spread = maxF.sub(minF);
+                DoubleMatrix m = sumF.div(size);
+                DoubleMatrix s = maxF.sub(minF);
                 for (int j = 0; j < parameters.featuresLength; j++) {
-                    double s = spread.get(j);
-                    if (s < 1e-6) {
-                        spread.put(j, 1);
-                        mean.put(j, 0);
+                    double v = s.get(j);
+                    if (v < 1e-6) {
+                        s.put(j, 1);
+                        m.put(j, 0);
                     }
                 }
-
-
+                mean = new DenseDoubleVector(m.toArray());
+                spread = new DenseDoubleVector(s.toArray());
             } else {
                 if (Math.abs(learningRate * parameters.learningRateFactor) < 1) {
                     learningRate = learningRate * parameters.learningRateFactor;
@@ -778,7 +749,7 @@ public class App {
                 if (minibatchSize >= maxbatchSize) minibatchSize = maxbatchSize;
                 if (testPosts != null || groupPred != null) {
                     try {
-                        NNPredictor predictor = new NNPredictor(network, mean, spread, parameters, state);
+                        NNPredictor predictor = new NNPredictor(network, mean, spread, parameters);
                         if (groupPred != null) {
                             synchronized (groupPred) {
                                 groupPred.put(groupPredKey, predictor);
@@ -791,13 +762,10 @@ public class App {
                         e.printStackTrace();
                     }
                 }
+                break epochCycle;
             }
-
-
         }
-
-
-        return new NNPredictor(network, mean, spread, parameters, state);
+        return new NNPredictor(network, mean, spread, parameters);
     }
 
 
