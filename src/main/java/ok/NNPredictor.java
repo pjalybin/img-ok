@@ -23,7 +23,7 @@ public class NNPredictor implements Predictor {
         this.parameters = parameters;
     }
 
-    public NNPredictor clone(){
+    public NNPredictor copy(){
             try(ByteArrayOutputStream bytes = new ByteArrayOutputStream();
                 ObjectOutputStream stream = new ObjectOutputStream(bytes)) {
                 MultilayerPerceptron.serialize(nn, stream);

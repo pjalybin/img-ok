@@ -10,7 +10,7 @@ import java.util.TreeMap;
 * @author Petr Zhalybin
 * @since 31.08.2014 13:37
 */
-class Parameters implements Serializable {
+class Parameters implements Serializable, Cloneable {
 
 
     final public String imagesWeightFolder = System.getProperty("ok.imagedir");
@@ -38,7 +38,7 @@ class Parameters implements Serializable {
     public int[] groups;
 
     double learningRate = getDoubleProperty("ok.learningRate", 0.1);
-    final double regularization = getDoubleProperty("ok.regularization", 0);
+    double regularization = getDoubleProperty("ok.regularization", 0);
     double learningRateFactor = getDoubleProperty("ok.learningRateFactor", 1);
     int minibatchSize = Integer.getInteger("ok.minibatchSize", 10000);
 
@@ -57,6 +57,7 @@ class Parameters implements Serializable {
     public final double nnMomentum = getDoubleProperty("ok.nn.momentum", 0);
     public final int nnIter = Integer.getInteger("ok.nn.iter", 1);
     public final int nnBatch = Integer.getInteger("ok.nn.batch", 10000);
+    public final int nnHyp=Integer.getInteger("ok.nn.hyp",-1);
 
     public final double devSetFrac = getDoubleProperty("ok.devset", 0.2);
 
@@ -66,4 +67,12 @@ class Parameters implements Serializable {
         return val == null ? defaultValue : Double.valueOf(val);
     }
 
+    @Override
+    public Parameters clone() {
+        try {
+            return (Parameters)super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

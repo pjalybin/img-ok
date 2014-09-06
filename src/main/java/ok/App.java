@@ -31,6 +31,8 @@ public class App {
 
     public static void main(String[] args) throws IOException {
 
+        printParams();
+
         final Parameters parameters = new Parameters();
 
         final Map<Integer, Post> posts = readPosts("train_content.csv");
@@ -157,6 +159,14 @@ public class App {
             parameters.nnLayers = nnl;
         }
 
+        if(parameters.nnHyp>0) {
+            List<Post> tHyp = train;
+            if(parameters.nnHyp<tHyp.size()){
+                tHyp=tHyp.subList(0, parameters.nnHyp);
+            }
+            hyper(parameters, dev, tHyp);
+        }
+
         Trainer trainer = parameters.nnLayers != null ? new Trainer() {
             @Override
             public Predictor train(Collection<Post> posts, Parameters parameters, String trainId, Map<Integer, Post> testPosts, Predictor initialPred, int epochNum, Map<Integer, Predictor> groupPred, int groupPredKey, Collection<Post> dev) {
@@ -169,10 +179,54 @@ public class App {
             }
         };
 
-        trainGropusParallel(posts.values(), train, dev, testPosts, parameters, groups, trainer);
+        trainGroupsParallel(posts.values(), train, dev, testPosts, parameters, groups, trainer);
 
         System.out.println("Done.");
 
+    }
+
+    private static void printParams() {
+        for (Map.Entry<Object, Object> e : System.getProperties().entrySet()) {
+            if(e.getKey().toString().startsWith("ok.")){
+                System.out.println(e.getKey()+" "+e.getValue());
+            }
+        }
+        System.out.println(new TreeMap<String,Object>());
+    }
+
+    private static String hyper(Parameters parameters, List<Post> dev, List<Post> train) {
+        int[][] lyr = {
+                {10},
+                {100},
+                {1000},
+                {10,10},
+                {100,100},
+                {1000,1000},
+        };
+
+        double bR=0;
+        String best=null;
+        for (int[] lr : lyr) {
+            for (int b : new int[]{0,1,10,100}) {
+                for (double reg : new double[]{0,1e-5,1e-3,1e-1}) {
+                    Parameters p = parameters.clone();
+                    p.regularization=reg;
+                    p.nnLayers=lr;
+                    p.minibatchSize=b;
+                    String trainId = Arrays.toString(lr) + " b" + b + " r" + reg;
+                    Predictor predictor = trainNN(train, p, trainId, null, null, 50, null, 0, null);
+                    double[] test = test(dev, predictor);
+                    double res=test[0];
+                    System.out.println("== "+trainId+" R2="+res);
+                    if(best==null || res>bR) {
+                        bR=res;
+                        best=trainId;
+                    }
+                    System.out.println("===BEST "+best+" R2="+bR);
+                }
+            }
+        }
+        return best;
     }
 
     private static void printSent2vecClosestPosts(Map<Integer, Post> posts, Map<Integer, Post> testPosts, int limit) {
@@ -252,7 +306,7 @@ public class App {
     }
 
 
-    private static void trainGropusParallel(final Collection<Post> all,
+    private static void trainGroupsParallel(final Collection<Post> all,
                                             final Collection<Post> train,
                                             final Collection<Post> dev,
                                             final Map<Integer, Post> testPosts,
@@ -643,7 +697,7 @@ public class App {
 
 
         if (initialPred instanceof NNPredictor) {
-            NNPredictor nnPredictor = ((NNPredictor) initialPred).clone();
+            NNPredictor nnPredictor = ((NNPredictor) initialPred).copy();
             network = nnPredictor.getNn();
             mean = nnPredictor.getMean();
             spread = nnPredictor.getSpread();
