@@ -24,15 +24,19 @@ public class NNPredictor implements Predictor {
     }
 
     public NNPredictor copy(){
+        try {
+            byte[] b;
             try(ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                ObjectOutputStream stream = new ObjectOutputStream(bytes)) {
+            ObjectOutputStream stream = new ObjectOutputStream(bytes);) {
                 MultilayerPerceptron.serialize(nn, stream);
-                try(DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
-                    MultilayerPerceptron copy = MultilayerPerceptron.deserialize(in);
-                    NNPredictor clone = new NNPredictor(copy,mean,spread,parameters);
-                    return clone;
-                }
-            } catch (IOException e) {
+                b = bytes.toByteArray();
+            }
+            try(ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(b))) {
+                MultilayerPerceptron copy = MultilayerPerceptron.deserialize(in);
+                NNPredictor clone = new NNPredictor(copy,mean,spread,parameters.clone());
+                return clone;
+            }
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
