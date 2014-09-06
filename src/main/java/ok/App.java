@@ -196,19 +196,22 @@ public class App {
 
     private static String hyper(Parameters parameters, List<Post> dev, List<Post> train) {
         int[][] lyr = {
-                {10},
                 {100},
-                {1000},
                 {10,10},
+                {1000},
                 {100,100},
+                {10},
+                {10,10,10},
+                {500},
+                {100,100,100},
                 {1000,1000},
         };
 
         double bR=0;
         String best=null;
         for (int[] lr : lyr) {
-            for (int b : new int[]{0,1,10,100}) {
-                for (double reg : new double[]{0,1e-5,1e-3,1e-1}) {
+            for (int b : new int[]{10,100}) {
+                for (double reg : new double[]{0}) {
                     Parameters p = parameters.clone();
                     p.regularization=reg;
                     p.nnLayers=lr;
