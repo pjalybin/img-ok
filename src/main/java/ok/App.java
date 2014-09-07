@@ -197,12 +197,11 @@ public class App {
     private static String hyper(Parameters parameters, List<Post> dev, List<Post> train) {
         int[][] lyr = {
                 {100},
-                {10,10},
-                {1000},
-                {100,100},
-                {10},
-                {10,10,10},
                 {500},
+                {1000},
+                {10,10,10},
+                {100,100},
+                {10000},
                 {100,100,100},
                 {1000,1000},
         };
@@ -210,14 +209,15 @@ public class App {
         double bR=0;
         String best=null;
         for (int[] lr : lyr) {
-            for (int b : new int[]{10,100}) {
-                for (double reg : new double[]{0}) {
+            for (int b : new int[]{1,10,100}) {
+                for (double reg : new double[]{0,1e-3}) {
                     Parameters p = parameters.clone();
                     p.regularization=reg;
                     p.nnLayers=lr;
                     p.minibatchSize=b;
                     String trainId = Arrays.toString(lr) + " b" + b + " r" + reg;
-                    Predictor predictor = trainNN(train, p, trainId, null, null, 50, null, 0, null);
+                    System.out.println("Grid training "+trainId);
+                    Predictor predictor = trainNN(train, p, trainId, null, null, 10, null, 0, null);
                     double[] test = test(dev, predictor);
                     double res=test[0];
                     System.out.println("== "+trainId+" R2="+res);
