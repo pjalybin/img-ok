@@ -9,8 +9,11 @@ import de.jungblut.math.activation.TanhActivationFunction;
 import de.jungblut.math.dense.DenseDoubleVector;
 import de.jungblut.math.dense.SingleEntryDoubleVector;
 import de.jungblut.math.minimize.Fmincg;
+import de.jungblut.math.minimize.GradientDescent;
 import de.jungblut.math.sparse.SparseDoubleVector;
 import de.jungblut.math.squashing.SquaredMeanErrorFunction;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.jblas.ComplexDoubleMatrix;
 import org.jblas.DoubleMatrix;
 import org.jblas.Eigen;
@@ -28,6 +31,8 @@ import java.util.concurrent.RecursiveAction;
  * @since 06.07.2014
  */
 public class App {
+
+    private static final Log logger = LogFactory.getLog(App.class);
 
     public static void main(String[] args) throws IOException {
 
@@ -64,7 +69,7 @@ public class App {
         });
 
         for (GroupStat w : groupStats) {
-            System.out.println(w.groupid + " " + w.likesStat.likesum / w.likesStat.count);
+            logger.info(w.groupid + " " + w.likesStat.likesum / w.likesStat.count);
 
         }
 
@@ -114,7 +119,7 @@ public class App {
                 + parameters.sentence2vecDim
                 + 2;
 
-        System.out.println("Features length " + parameters.featuresLength);
+        logger.info("Features length " + parameters.featuresLength);
 
         setSkipcolumns(parameters);
 
@@ -181,17 +186,17 @@ public class App {
 
         trainGroupsParallel(posts.values(), train, dev, testPosts, parameters, groups, trainer);
 
-        System.out.println("Done.");
+        logger.info("Done.");
 
     }
 
     private static void printParams() {
         for (Map.Entry<Object, Object> e : System.getProperties().entrySet()) {
             if(e.getKey().toString().startsWith("ok.")){
-                System.out.println(e.getKey()+" "+e.getValue());
+                logger.info(e.getKey()+" "+e.getValue());
             }
         }
-        System.out.println(new TreeMap<String,Object>());
+        logger.info(new TreeMap<String,Object>());
     }
 
     private static String hyper(Parameters parameters, List<Post> dev, List<Post> train) {
@@ -216,16 +221,16 @@ public class App {
                     p.nnLayers=lr;
                     p.minibatchSize=b;
                     String trainId = Arrays.toString(lr) + " b" + b + " r" + reg;
-                    System.out.println("Grid training "+trainId);
+                    logger.info("Grid training "+trainId);
                     Predictor predictor = trainNN(train, p, trainId, null, null, 10, null, 0, null);
                     double[] test = test(dev, predictor);
                     double res=test[0];
-                    System.out.println("== "+trainId+" R2="+res);
+                    logger.info("== "+trainId+" R2="+res);
                     if(best==null || res>bR) {
                         bR=res;
                         best=trainId;
                     }
-                    System.out.println("===BEST "+best+" R2="+bR);
+                    logger.info("===BEST "+best+" R2="+bR);
                 }
             }
         }
@@ -237,16 +242,16 @@ public class App {
         Collections.shuffle(postsShuffled);
         postsShuffled = postsShuffled.subList(0, limit);
         for (Post post : postsShuffled) {
-            System.out.println(post.txt);
+            logger.info(post.txt);
             List<Post> closestSent2vec = findClosestSent2vec(post, 10, posts, testPosts);
             for (Post p : closestSent2vec.subList(1, 10)) {
-                System.out.println("              " + p.txt);
+                logger.info("              " + p.txt);
             }
         }
     }
 
     private static int readSentence2vec(File file, Map<Integer, Post>... posts) throws IOException {
-        System.out.println("Reading Sentence2vec");
+        logger.info("Reading Sentence2vec");
         try (CSVReader reader = new CSVReader(new FileReader(file), ' ', '\0')) {
             String[] head = reader.readNext();
             int rows = Integer.valueOf(head[0]);
@@ -259,7 +264,7 @@ public class App {
             int ii = 0;
             for (Map<Integer, Post> postMap : posts) {
                 for (Map.Entry<Integer, Post> e : postMap.entrySet()) {
-                    if (++ii % 10000 == 0) System.out.println(ii);
+                    if (++ii % 10000 == 0) logger.info(ii);
                     Post post = e.getValue();
                     String[] row = reader.readNext();
                     if (row.length != dim + 1) throw new RuntimeException("Bad row " + row.length);
@@ -287,11 +292,11 @@ public class App {
 
         parameters.words = prepareBow(wordStatHashMap, posts.size(), parameters.wordFreqLimit, parameters.wordLimit);
         parameters.bowDim = parameters.words.size();
-        System.out.println("BOW size " + parameters.bowDim);
+        logger.info("BOW size " + parameters.bowDim);
 
         parameters.trigrams = prepareBow(trigramsStatHashMap, posts.size(), parameters.trigramFreqLimit, parameters.trigramLimit);
         parameters.trigramDim = parameters.trigrams.size();
-        System.out.println("Bag of trigrams size " + parameters.trigramDim);
+        logger.info("Bag of trigrams size " + parameters.trigramDim);
     }
 
     private static void saveFeaturesNames(Parameters parameters, File file) throws IOException {
@@ -399,7 +404,7 @@ public class App {
         double v2 = variance(y).sum();
         double r2 = v2 < 1e-6 ? 0 : (1 - v1 / v2) * 1000;
         double cost = MatrixFunctions.pow(sub, 2).sum() / i;
-        System.out.println("test R2 = " + r2 + "\t Cost = " + cost);
+        logger.info("test R2 = " + r2 + "\t Cost = " + cost);
         return new double[]{r2, cost};
     }
 
@@ -408,7 +413,7 @@ public class App {
         saveResults(predictor, fileName.replace(".csv", "_train.csv"), train, true);
         saveResults(predictor, fileName, test, false);
         savePredictor(predictor);
-        System.out.println("Saved result " + new Date());
+        logger.info("Saved result " + new Date());
     }
 
     private static List<String> prepareBow(Map<String, WordStat> wordStatHashMap, int postsSize, int wordFreqLimit, int wordLimit) {
@@ -434,7 +439,7 @@ public class App {
                 break;
             }
         }
-        System.out.println(words.toString());
+        logger.info(words.toString());
         int bowDim = words.size();
         for (int i = 0; i < bowDim; i++) {
             String w = words.get(i);
@@ -475,7 +480,7 @@ public class App {
         for (int i = 0; i < fn.length; i++) {
             res[i] = columnsNames.contains(fn[i]) ^ skip;
             if (!res[i]) {
-                System.out.println(fn[i] + "\t" + getFeatureReadableName(parameters, fn[i]));
+                logger.info(fn[i] + "\t" + getFeatureReadableName(parameters, fn[i]));
             }
         }
         return res;
@@ -530,7 +535,7 @@ public class App {
 
     private static void savePredictor(Predictor predictor) throws IOException {
         String file = System.getProperty("ok.outfile", "predictor.bin");
-        System.out.println("Save result to " + file);
+        logger.info("Save result to " + file);
         try (ObjectOutputStream objectOutputStream = new ObjectOutputStream(new FileOutputStream(file))) {
             objectOutputStream.writeObject(predictor);
         }
@@ -704,7 +709,6 @@ public class App {
             network = nnPredictor.getNn();
             mean = nnPredictor.getMean();
             spread = nnPredictor.getSpread();
-
             epoch = 1;
         } else {
             int[] layers=new int[parameters.nnLayers.length+2];
@@ -761,21 +765,19 @@ public class App {
                     }
                 } else {
                     double y = post.likes;
-
                     int row = 0;
                     try {
                         row = (pn - 1) % nnBatch;
                         X[row] = new SparseDoubleVector(f).subtract(mean).divide(spread);
                         Y[row] = new SingleEntryDoubleVector(y);
                     } catch (OutOfMemoryError e) {
-                        System.err.println(pn);
+                        logger.error(pn, e);
                         throw e;
                     }
-
                     if (row + 1 == nnBatch || pn == postsSize) {
-
-                        network.train(X,Y);
-                        System.out.println(trainId+" e="+epoch+" n="+pn);
+                        double error = network.train(X, Y,
+                                new Fmincg(), epochNum, parameters.regularization, true);
+                        logger.info(trainId+" e="+epoch+" n="+pn+" cost="+error);
                         if (initialPred == null && dev != null) {
                             test(dev, new NNPredictor(network, mean, spread, parameters));
                         }
@@ -909,7 +911,7 @@ public class App {
 
 //                        if(minibatchSize==-1000){
 //                            DoubleMatrix pca=klt_pca(X,50);
-//                            System.out.println(pca);
+//                            logger.info(pca);
 //                        }
 
                         DoubleMatrix sm = X.mmul(theta);
@@ -928,7 +930,7 @@ public class App {
                                         (minibatchSize);
                             }
 
-                            System.out.println(trainId + " epoch=" + epoch + " lr=" + learningRate + " batch=" + minibatchSize + " R2=" + r2 + " cost=" + cost);
+                            logger.info(trainId + " epoch=" + epoch + " lr=" + learningRate + " batch=" + minibatchSize + " R2=" + r2 + " cost=" + cost);
 //                            if(minibatchSize>90000 && minibatchSize<100000) {
 //                                DoubleMatrix means = MatrixFunctions.pow(X.mulRowVector(theta).mul(minibatchSize/1000),2).columnMeans();
 //                                System.err.println(means.toString());
@@ -990,7 +992,7 @@ public class App {
             }
 
         }
-//        System.out.println(theta.toString());
+//        logger.info(theta.toString());
         return new LinearPredictor(theta, mean, spread, parameters);
     }
 
@@ -999,7 +1001,7 @@ public class App {
 //            feats[pn]=f;
         Arrays.fill(f, 0);
 
-//                if (pn % p == 0) System.out.println("features " + pn + "/" + ps);
+//                if (pn % p == 0) logger.info("features " + pn + "/" + ps);
 
 
 //            double y = post.likes;
@@ -1256,7 +1258,7 @@ public class App {
 
 
     private static void computePostGroupTimeStat(Map<Integer, Post>... postss) {
-        System.out.println("computePostGroupTimeStat");
+        logger.info("computePostGroupTimeStat");
         final Map<Integer, ArrayList<Post>> postsByGroupTime = new TreeMap<>();
         for (Map<Integer, Post> posts : postss) {
             for (Post post : posts.values()) {
@@ -1282,7 +1284,7 @@ public class App {
             Collections.sort(posts, comparator);
             int len = posts.size();
             for (int i = 0; i < len; i++) {
-                if (++jj % 10000 == 0) System.out.println(jj);
+                if (++jj % 10000 == 0) logger.info(jj);
 
                 Post post = posts.get(i);
                 int n = 0;
@@ -1342,7 +1344,7 @@ public class App {
         });
 
         for (Post post : bestposts) {
-            System.out.println(post.likes + "\t" + post.txt);
+            logger.info(post.likes + "\t" + post.txt);
         }
     }
 
@@ -1390,7 +1392,7 @@ public class App {
             if (p <= 0) p = 1;
             int pn = 0;
             for (Post post : posts.values()) {
-                if (++pn % p == 0) System.out.println("word " + pn + "/" + ps);
+                if (++pn % p == 0) logger.info("word " + pn + "/" + ps);
                 List<String> words = tokeniser.tokenize(post.txt);
 
                 HashSet<String> wordsSet = new HashSet<>();
@@ -1571,10 +1573,10 @@ public class App {
         CSVReader reader = new CSVReader(new FileReader(fileName), '\t', '\0');
         int line = 0;
         Post prevpost = null;
-        System.out.println("Reading " + fileName + " ...");
+        logger.info("Reading " + fileName + " ...");
         int j = 0;
         while (true) {
-            if (++j % 10000 == 0) System.out.println(j);
+            if (++j % 10000 == 0) logger.info(j);
             String[] next = reader.readNext();
             if (next == null) break;
             line++;
@@ -1618,10 +1620,10 @@ public class App {
 
     private static void readLikes(Map<Integer, Post> posts) throws IOException {
         CSVReader reader2 = new CSVReader(new FileReader("train_likes_count.csv"), ',');
-        System.out.println("Reading likes count...");
+        logger.info("Reading likes count...");
         int j = 0;
         while (true) {
-            if (++j % 10000 == 0) System.out.println(j);
+            if (++j % 10000 == 0) logger.info(j);
             String[] next = reader2.readNext();
             if (next == null) break;
             if (next.length < 2) {
@@ -1645,10 +1647,10 @@ public class App {
 
     private static void readLikes2(Map<Integer, Post> posts, Map<Integer, DateStat> totalDateStat) throws IOException {
         CSVReader reader2 = new CSVReader(new FileReader("train_likes.csv"), '\t');
-        System.out.println("Reading likes time...");
+        logger.info("Reading likes time...");
         int j = 0;
         while (true) {
-            if (++j % 1000000 == 0) System.out.println(j);
+            if (++j % 1000000 == 0) logger.info(j);
             String[] next = reader2.readNext();
             if (next == null) break;
             if (next.length < 3) {
@@ -1861,7 +1863,7 @@ public class App {
         if (imageDataFile.exists()) {
             try (ObjectInputStream objectInStream = new ObjectInputStream(new FileInputStream(imageDataFile))) {
                 result = (Map<Long, ImageWeight[]>) objectInStream.readObject();
-                System.out.println("Read images from " + imageDataFile.getName());
+                logger.info("Read images from " + imageDataFile.getName());
                 return result;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -1871,10 +1873,10 @@ public class App {
         result = new HashMap<>();
         File[] files = dirImages.listFiles();
         String postf = ".jpeg.ppm.txt";
-        System.out.println("Reading images");
+        logger.info("Reading images");
         int p = 0;
         for (File file : files) {
-            if (++p % 10000 == 0) System.out.println(p + "/" + files.length);
+            if (++p % 10000 == 0) logger.info(p + "/" + files.length);
             String fileName = file.getName();
             if (fileName.endsWith(postf)) {
                 long imgId = Long.valueOf(fileName.substring(0, fileName.length() - postf.length()));
@@ -1894,7 +1896,7 @@ public class App {
         }
         try (ObjectOutputStream objectOutputStream = new ObjectOutputStream(new FileOutputStream(imageDataFile))) {
             objectOutputStream.writeObject(result);
-            System.out.println("Save images data to " + imageDataFile.getName());
+            logger.info("Save images data to " + imageDataFile.getName());
         }
         return result;
     }
