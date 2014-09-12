@@ -2,6 +2,7 @@ package ok;
 
 import au.com.bytecode.opencsv.CSVReader;
 import de.jungblut.classification.nn.MultilayerPerceptron;
+import de.jungblut.classification.nn.TrainingType;
 import de.jungblut.math.DoubleVector;
 import de.jungblut.math.activation.ActivationFunction;
 import de.jungblut.math.activation.LinearActivationFunction;
@@ -9,7 +10,6 @@ import de.jungblut.math.activation.TanhActivationFunction;
 import de.jungblut.math.dense.DenseDoubleVector;
 import de.jungblut.math.dense.SingleEntryDoubleVector;
 import de.jungblut.math.minimize.Fmincg;
-import de.jungblut.math.minimize.GradientDescent;
 import de.jungblut.math.sparse.SparseDoubleVector;
 import de.jungblut.math.squashing.SquaredMeanErrorFunction;
 import org.apache.commons.logging.Log;
@@ -34,7 +34,16 @@ public class App {
 
     private static final Log logger = LogFactory.getLog(App.class);
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
+        try {
+            run();
+        } catch (Throwable e) {
+            logger.error("Error",e);
+        }
+    }
+    public static void run() throws IOException {
+
+
 
         printParams();
 
@@ -193,10 +202,10 @@ public class App {
     private static void printParams() {
         for (Map.Entry<Object, Object> e : System.getProperties().entrySet()) {
             if(e.getKey().toString().startsWith("ok.")){
-                logger.info(e.getKey()+" "+e.getValue());
+                logger.info(e.getKey() + " " + e.getValue());
             }
         }
-        logger.info(new TreeMap<String,Object>());
+        logger.info(new TreeMap<String, Object>());
     }
 
     private static String hyper(Parameters parameters, List<Post> dev, List<Post> train) {
@@ -214,8 +223,14 @@ public class App {
         double bR=0;
         String best=null;
         for (int[] lr : lyr) {
-            for (int b : new int[]{1,10,100}) {
-                for (double reg : new double[]{0,1e-3}) {
+            for (int b : new int[]{
+                    10,
+                    100,
+            }) {
+                for (double reg : new double[]{
+                        0,
+                        1e-4,
+                }) {
                     Parameters p = parameters.clone();
                     p.regularization=reg;
                     p.nnLayers=lr;
@@ -225,12 +240,12 @@ public class App {
                     Predictor predictor = trainNN(train, p, trainId, null, null, 10, null, 0, null);
                     double[] test = test(dev, predictor);
                     double res=test[0];
-                    logger.info("== "+trainId+" R2="+res);
+                    logger.info("== " + trainId + " R2=" + res);
                     if(best==null || res>bR) {
                         bR=res;
                         best=trainId;
                     }
-                    logger.info("===BEST "+best+" R2="+bR);
+                    logger.info("===BEST " + best + " R2=" + bR);
                 }
             }
         }
@@ -321,13 +336,18 @@ public class App {
                                             final Parameters parameters,
                                             final Map<Integer, List<Post>> groups,
                                             Trainer trainer) throws IOException {
-        final Predictor predictorAll = trainer.train(train, parameters, "all", testPosts, null,
-                Integer.getInteger("ok.epochnum2", 5), null, 0, dev);
+        Predictor predictorAll1 = null;
+        Integer epochNum2 = Integer.getInteger("ok.epochnum2", 5);
+        if(epochNum2>0) {
+            predictorAll1 = trainer.train(train, parameters, "all", testPosts, null,
+                    epochNum2, null, 0, dev);
 
 
-        test(dev, predictorAll);
+            test(dev, predictorAll1);
 //        savePredictor(predictorAll);
+        }
 
+        final Predictor predictorAll = predictorAll1;
         final Map<Integer, Predictor> groupPred = new TreeMap<>();
         ArrayList<RecursiveAction> actions = new ArrayList<>();
 
@@ -355,21 +375,16 @@ public class App {
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
-                Predictor ensembleGroupPredictor = null;
+                Predictor ensembleGroupPredictor;
                 synchronized (groupPred) {
-                    if (groupPred.size() == groups.size()) {
-                        ensembleGroupPredictor = new PredictorGroupEnsemble(groupPred);
-                    }
+                    ensembleGroupPredictor = new PredictorGroupEnsemble(groupPred);
                 }
-                if (ensembleGroupPredictor != null) {
-                    try {
-                        test(dev, ensembleGroupPredictor);
-                        saveResults(ensembleGroupPredictor, all, testPosts.values());
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
+                try {
+                    test(dev, ensembleGroupPredictor);
+                    saveResults(ensembleGroupPredictor, all, testPosts.values());
+                } catch (Throwable e) {
+                    e.printStackTrace();
                 }
-
             }
         }, period, period);
 
@@ -716,7 +731,7 @@ public class App {
             for (int i = 0; i < layers.length; i++) {
                 if(i == 0) {
                     layers[i]=parameters.featuresLength;
-                    activations[i] = new LinearActivationFunction();
+                    activations[i] = new TanhActivationFunction();
                 } else if(i + 1 == layers.length) {
                     layers[i]=1;
                     activations[i] = new LinearActivationFunction();
@@ -734,7 +749,9 @@ public class App {
                     epochNum
             )
                     .lambda(parameters.regularization)
+
                     .verbose(true)
+                    .trainingType(parameters.gpu ? TrainingType.GPU : TrainingType.CPU)
                     .miniBatchSize(minibatchSize)
                     .build();
 
@@ -768,7 +785,13 @@ public class App {
                     int row = 0;
                     try {
                         row = (pn - 1) % nnBatch;
-                        X[row] = new SparseDoubleVector(f).subtract(mean).divide(spread);
+                        DoubleVector vector;
+//                        if(parameters.gpu){
+                            vector = new DenseDoubleVector(f);
+//                        } else {
+//                            vector = new SparseDoubleVector(f);
+//                        }
+                        X[row] = vector.subtract(mean).divide(spread);
                         Y[row] = new SingleEntryDoubleVector(y);
                     } catch (OutOfMemoryError e) {
                         logger.error(pn, e);
@@ -777,7 +800,7 @@ public class App {
                     if (row + 1 == nnBatch || pn == postsSize) {
                         double error = network.train(X, Y,
                                 new Fmincg(), epochNum, parameters.regularization, true);
-                        logger.info(trainId+" e="+epoch+" n="+pn+" cost="+error);
+                        logger.info(trainId + " e=" + epoch + " n=" + pn + " cost=" + error);
                         if (initialPred == null && dev != null) {
                             test(dev, new NNPredictor(network, mean, spread, parameters));
                         }
@@ -1550,7 +1573,7 @@ public class App {
     static double[] readCsvDoubleColumn(String fileName) throws IOException {
         try (BufferedReader reader = new BufferedReader(new FileReader(fileName))) {
             String line;
-            ArrayList<Double> list = new ArrayList<>();
+            ArrayList<Double> list = new ArrayList<Double>();
             while (null != (line = reader.readLine())) {
                 try {
                     list.add(Double.valueOf(line.trim()));
@@ -1931,6 +1954,12 @@ public class App {
             Predictor predictor = groupPred.get(g);
             if (predictor == null) {
                 predictor = groupPred.get(0);
+                if (predictor == null) {
+                    predictor = groupPred.entrySet().iterator().next().getValue();
+                    if (predictor == null) {
+                        return 0.0;
+                    }
+                }
             }
             return predictor.predict(post);
         }

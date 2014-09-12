@@ -58,6 +58,7 @@ class Parameters implements Serializable, Cloneable {
     public final int nnIter = Integer.getInteger("ok.nn.iter", 1);
     public final int nnBatch = Integer.getInteger("ok.nn.batch", 10000);
     public final int nnHyp=Integer.getInteger("ok.nn.hyp",-1);
+    public final boolean gpu=Boolean.getBoolean("ok.gpu");
 
     public final double devSetFrac = getDoubleProperty("ok.devset", 0.2);
 
